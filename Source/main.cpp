@@ -4,15 +4,19 @@
 #include <array>
 #include <filesystem>
 #include <string>
+#include <optional>
 
 #include <glm/glm.hpp>
 
 #include "SOIS/ImGuiSample.hpp"
 #include "SOIS/ApplicationContext.hpp"
+#include "SOIS/Renderer.hpp"
 
-#include "imgui/imgui_stdlib.h"
-#include "imgui/imgui_internal.h"
+#include "SDL.h"
+#include "imgui_stdlib.h"
+#include "imgui_internal.h"
 
+#include "nfd.h"
 
 // Returns float between 0 and 1, inclusive;
 float Rand()
@@ -151,6 +155,165 @@ std::string GetImGuiIniPath()
     return path.u8string();
 }
 
+std::string PickImageFile()
+{
+    std::string out;
+    nfdchar_t *outPath = nullptr;
+    nfdresult_t result = NFD_OpenDialog("png,jpg", NULL, &outPath);
+        
+    if ( result == NFD_OKAY ) {
+        out = outPath;
+        free(outPath);
+    }
+
+    return out;
+}
+
+static bool gShowMainWindow = true;
+static std::string gBingoCard;
+static std::string gBingoChip;
+
+std::unique_ptr<SOIS::Texture> gBingoCardTexture;
+std::unique_ptr<SOIS::Texture> gBingoChipTexture;
+
+bool FileUpdate(char const* aButtonLabel, char const* aLabel, std::string& file)
+{
+    bool changed = false;
+    if (ImGui::Button(aButtonLabel))
+    {
+        file = PickImageFile();
+        changed = changed || !file.empty();
+    }
+    ImGui::SameLine();
+    return changed || ImGui::InputText(aLabel, &file);
+}
+
+
+struct ImageDisplay
+{
+    ImVec2 Dimensions;
+    ImVec2 Position;
+};
+
+// https://codereview.stackexchange.com/a/70916
+ImageDisplay StretchToFit(ImVec2 aImageResolution, ImVec2 aWindowResolution)
+{
+    float scaleHeight = aWindowResolution.y / aImageResolution.y;
+    float scaleWidth = aWindowResolution.x / aImageResolution.x;
+    float scale = std::min(scaleHeight, scaleWidth);
+    
+    auto dimensions = ImVec2(scale * aImageResolution.x, scale * aImageResolution.y);
+    auto position = ImVec2(0.f, 0.f);
+    
+    position = ImVec2((aWindowResolution.x - dimensions.x)/2, (aWindowResolution.y - dimensions.y)/2);
+
+    return ImageDisplay{ dimensions, position };
+}
+
+ImageDisplay GetRenderDimensions(ImVec2 aImageResolution)
+{
+    ImGuiIO& io = ImGui::GetIO();
+    return StretchToFit(aImageResolution, io.DisplaySize);
+}
+
+void RenderBingoCard()
+{
+    auto& io = ImGui::GetIO();
+
+    auto dimensions = GetRenderDimensions(ImVec2( gBingoCardTexture->Width, gBingoCardTexture->Height));
+            
+    ImGui::SetCursorPos(ImVec2{ dimensions.Position.x + 10, dimensions.Position.y + 10 });
+
+    ImGui::Image((void*)gBingoCardTexture->GetTextureId(), dimensions.Dimensions/*, uv1, uv2*/);
+}
+
+
+std::vector<ImVec2> gChipPositions;// {ImVec2{ 10.0f, 10.0f }};
+void RenderBingoChips()
+{
+    std::optional<size_t> toBeDeleted;
+    auto& io = ImGui::GetIO();
+    float scale = 100;
+    
+    bool isAnythingClicked = false;
+    size_t i = 0;
+    for (auto& chipPosition : gChipPositions)
+    {
+        ImGui::SetCursorPos(chipPosition);
+        ImGui::IsItemClicked();
+        
+        ImGui::PushID((size_t)gBingoChipTexture->GetTextureId() + i);
+        if (ImGui::ImageButton(gBingoChipTexture->GetTextureId(), ImVec2{ scale * 1, scale * 1 }, ImVec2{ 0,0 }, ImVec2{ 1,1 }, 0)
+            || ImGui::IsItemActive())
+        {
+            ImGui::PopID();
+            chipPosition = ImVec2{ chipPosition.x + io.MouseDelta.x, chipPosition.y + io.MouseDelta.y};
+
+            isAnythingClicked = true;
+        }
+        else if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+        {
+            toBeDeleted = i;
+            isAnythingClicked = true;
+            ImGui::PopID();
+        }
+        else
+            ImGui::PopID();
+
+        ++i;
+    }
+
+    if (toBeDeleted.has_value())
+    {
+        gChipPositions.erase(gChipPositions.begin() + *toBeDeleted);
+    }
+    
+
+    if (!isAnythingClicked && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && ImGui::IsWindowFocused())
+    {
+        ImVec2 mousePosition = ImGui::GetMousePos();
+        float toSubtract = scale * .5f;
+        ImVec2 position{mousePosition.x - toSubtract, mousePosition.y - toSubtract };
+        gChipPositions.push_back(position);
+    }
+}
+
+bool gDisableFancyPoints = false;
+
+void MainWindow(SOIS::ApplicationContext& aContext)
+{
+    auto& io = ImGui::GetIO();
+
+    if (gBingoCardTexture)
+        RenderBingoCard();
+
+    if (io.KeysDown[SDL_SCANCODE_ESCAPE] && (io.KeysDownDuration[SDL_SCANCODE_ESCAPE] == 0.f))
+        gShowMainWindow = !gShowMainWindow;
+
+    if (false == gShowMainWindow)
+        return;
+
+    if (ImGui::Begin("Settings Window"))
+    {
+        if (FileUpdate("Open Bingo Card", "Bingo Card", gBingoCard))
+            gBingoCardTexture = aContext.GetRenderer()->LoadTextureFromFile(gBingoCard);
+        
+        if (FileUpdate("Open Bingo Chip", "Bingo Chip", gBingoChip))
+            gBingoChipTexture = aContext.GetRenderer()->LoadTextureFromFile(gBingoChip);
+
+        if (ImGui::Button("Clear Chips"))
+            gChipPositions.clear();
+
+        if (ImGui::Button("Toggle Fancy Points"))
+            gDisableFancyPoints = !gDisableFancyPoints;
+
+        ImGui::End();
+    }
+    
+    if (gBingoChipTexture)
+        RenderBingoChips();
+}
+
 int main(int, char**)
 {
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
@@ -179,7 +342,6 @@ int main(int, char**)
             ImGuiWindowFlags_NoCollapse |  
             ImGuiWindowFlags_NoDecoration | 
             ImGuiWindowFlags_NoDocking |
-            ImGuiWindowFlags_NoInputs | 
             ImGuiWindowFlags_NoMove);
         {
             static bool firstRun = true;
@@ -194,7 +356,10 @@ int main(int, char**)
             ImGui::SetWindowSize(ImVec2(io.DisplaySize.x, io.DisplaySize.y));
             ImGui::SetWindowPos(ImVec2(0, 0));
 
-            DrawPoints(points);
+            if (!gDisableFancyPoints)
+                DrawPoints(points);
+
+            MainWindow(context);
         }
         ImGui::End();
 
