@@ -6,6 +6,7 @@
 #include <string>
 #include <optional>
 
+#include <gli/gli.hpp>
 #include <glm/glm.hpp>
 
 #include "SOIS/ImGuiSample.hpp"
@@ -159,7 +160,7 @@ std::string PickImageFile()
 {
     std::string out;
     nfdchar_t *outPath = nullptr;
-    nfdresult_t result = NFD_OpenDialog("png,jpg", NULL, &outPath);
+    nfdresult_t result = NFD_OpenDialog("png,jpg,dds", NULL, &outPath);
         
     if ( result == NFD_OKAY ) {
         out = outPath;
@@ -280,6 +281,28 @@ void RenderBingoChips()
 
 bool gDisableFancyPoints = false;
 
+int ConvertToDx(int format);
+
+//struct TextureBetter : protected gli::texture
+//{
+//  static size_t GetBlockSize(gli::texture& texture)
+//  {
+//    return texture.Storage->block_size();
+//  }
+//};
+
+std::unique_ptr<SOIS::Texture> UploadDDS(std::string& filename, SOIS::Renderer* renderer)
+{
+    gli::texture texture = gli::load(filename);
+    auto data = texture.data(0, 0, 0);
+    auto extent = texture.extent(0);
+    int pitch = 16 * ((extent.x + 3) / 4);
+    if (gli::format::FORMAT_RGBA_DXT1_UNORM_BLOCK8 == texture.format())
+      pitch = 8 * ((extent.x + 3) / 4);
+
+    return renderer->LoadTextureFromData((unsigned char*)data, ConvertToDx(texture.format()), extent.x, extent.y, pitch);
+}
+
 void MainWindow(SOIS::ApplicationContext& aContext)
 {
     auto& io = ImGui::GetIO();
@@ -296,7 +319,10 @@ void MainWindow(SOIS::ApplicationContext& aContext)
     if (ImGui::Begin("Settings Window"))
     {
         if (FileUpdate("Open Bingo Card", "Bingo Card", gBingoCard))
-            gBingoCardTexture = aContext.GetRenderer()->LoadTextureFromFile(gBingoCard);
+        {
+          gBingoCardTexture = UploadDDS(gBingoCard, aContext.GetRenderer());
+            //gBingoCardTexture = aContext.GetRenderer()->LoadTextureFromFile(gBingoCard);
+        }
         
         if (FileUpdate("Open Bingo Chip", "Bingo Chip", gBingoChip))
             gBingoChipTexture = aContext.GetRenderer()->LoadTextureFromFile(gBingoChip);
@@ -369,4 +395,22 @@ int main(int, char**)
     }
 
     return 0;
+}
+
+#include <dxgiformat.h>
+
+int ConvertToDx(int format)
+{
+  switch (format)
+  {
+    case gli::format::FORMAT_RGBA_DXT1_UNORM_BLOCK8: return DXGI_FORMAT_BC1_UNORM;
+    case gli::format::FORMAT_RGBA_DXT5_UNORM_BLOCK16: return DXGI_FORMAT_BC3_UNORM;
+    //case gli::format::FORMAT_RG_ATI2N_UNORM_BLOCK16: return DXGI_FORMAT_BC5_UNORM;
+    case gli::format::FORMAT_RGBA_BP_UNORM_BLOCK16: return DXGI_FORMAT_BC7_UNORM;
+
+    case gli::format::FORMAT_RGBA_DXT1_SRGB_BLOCK8: return DXGI_FORMAT_BC1_UNORM_SRGB;
+    case gli::format::FORMAT_RGBA_DXT5_SRGB_BLOCK16: return DXGI_FORMAT_BC3_UNORM_SRGB;
+    //case gli::format::FORMAT_RG_ATI2N_SRGB_BLOCK16: return DXGI_FORMAT_BC5_UNORM_SRGB;
+    case gli::format::FORMAT_RGBA_BP_SRGB_BLOCK16: return DXGI_FORMAT_BC7_UNORM_SRGB;
+  }
 }

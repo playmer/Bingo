@@ -1,3 +1,6 @@
 [submodule "Dependencies/SOIS"]
 	path = Dependencies/SOIS
 	url = https://github.com/playmer/SOIS.git
+[submodule "Dependencies/gli"]
+	path = Dependencies/gli
+	url = https://github.com/g-truc/gli

@@ -8,7 +8,8 @@ PRIVATE
 target_include_directories(PadInput 
 PRIVATE 
     ${CMAKE_CURRENT_LIST_DIR}
-    ${DependenciesDirectory}/glm)
+    ${DependenciesDirectory}/glm
+    ${DependenciesDirectory}/gli)
 
 target_link_libraries(PadInput 
 PRIVATE
